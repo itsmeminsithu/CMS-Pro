@@ -8,6 +8,9 @@ import { SERVICES } from './constants';
 type Theme = 'light' | 'dark' | 'system';
 
 const App: React.FC = () => {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [activeView, setActiveView] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => {
@@ -38,6 +41,13 @@ const App: React.FC = () => {
     }
   }, [theme]);
 
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loginEmail && loginPassword) {
+      setIsLoggedIn(true);
+    }
+  };
+
   const renderContent = () => {
     if (activeView === 'dashboard' || activeView === 'visa-portal') {
       return <Dashboard onSelectService={setActiveView} forceVisaView={activeView === 'visa-portal'} />;
@@ -65,6 +75,44 @@ const App: React.FC = () => {
       </div>
     );
   };
+
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
+        <div className="w-full max-w-md bg-white dark:bg-slate-800 rounded-[2.5rem] shadow-2xl p-10 space-y-8 animate-slideUp">
+          <div className="text-center space-y-2">
+            <div className="w-20 h-20 bg-blue-600 rounded-3xl mx-auto flex items-center justify-center text-white shadow-xl shadow-blue-500/30">
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-4.514A9.01 9.01 0 0012 20.399a9.003 9.003 0 0012-8.41c0-1.12-.205-2.192-.58-3.181M12 11V3m0 8c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3z" /></svg>
+            </div>
+            <h1 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tight">VisaCMS Admin Panel</h1>
+            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Authorized Access Only</p>
+          </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <input 
+              type="email" 
+              placeholder="Admin Email" 
+              className="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-700 border-2 border-slate-100 dark:border-slate-600 outline-none focus:border-blue-500 transition-all text-sm font-medium"
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
+              required
+            />
+            <input 
+              type="password" 
+              placeholder="Password" 
+              className="w-full px-6 py-4 rounded-2xl bg-slate-50 dark:bg-slate-700 border-2 border-slate-100 dark:border-slate-600 outline-none focus:border-blue-500 transition-all text-sm font-medium"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              required
+            />
+            <button type="submit" className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest rounded-2xl shadow-lg transition-all transform active:scale-95">
+              Secure Login
+            </button>
+          </form>
+          <p className="text-center text-[10px] text-slate-400 font-bold uppercase tracking-widest">Powered by Gemini Intelligent Systems</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-slate-950 relative overflow-x-hidden transition-colors duration-300">

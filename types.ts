@@ -31,7 +31,9 @@ export interface VisaApplication {
   notes: string;
   price: string;
   costPrice: string;
+  agencyCommission?: number;
   flightNo?: string;
+  airline?: string;
   embarkation?: string;
   agentName?: string;
   visaType?: string;
@@ -39,7 +41,9 @@ export interface VisaApplication {
   address?: string;
   origin?: string;
   destination?: string;
-  paxCount?: number; // New: Number of people (Pax)
+  departCountry?: string; // New: Country of departure
+  landedCountry?: string; // New: Country of landing (Thailand)
+  paxCount?: number;
 }
 
 export interface ServiceConfig {

@@ -1,5 +1,16 @@
 {
   "name": "Thai Visa CMS Pro",
   "description": "A comprehensive CMS management application for Thailand visa services, featuring service categorization, office-specific tracking (GC/IT), and automated client management.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "backendConfig": {
+    "apiBaseUrl": "https://api.visacms-thailand.com/v1",
+    "endpoints": {
+      "applications": "/applications",
+      "flightSync": "/flights/sync",
+      "manifestImport": "/manifests/import",
+      "auth": "/auth/login"
+    },
+    "timeout": 5000,
+    "retryAttempts": 3
+  }
 }

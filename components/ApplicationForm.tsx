@@ -1,6 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { VisaApplication, ServiceConfig, ServiceCategory } from '../types';
+import { lookupFlightDetails } from '../services/geminiService';
+import { normalizeFlight } from '../services/dataStore';
 
 interface ApplicationFormProps {
   service: ServiceConfig;
@@ -9,20 +11,29 @@ interface ApplicationFormProps {
   initialData?: VisaApplication;
 }
 
+const VISA_TYPES = [
+  'Arrival (VOA)', 'TR (Tourist)', 'ED (Education)', 'DTV (Destination Thailand)', 
+  'Non-LA', 'Non-B (Business)', 'Non-O (Family)', 'Non-O-A (Retirement)', 'Special'
+];
+
 const Label: React.FC<React.PropsWithChildren<{ required?: boolean }>> = ({ children, required }) => (
   <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-2 ml-1">
     {children} {required && <span className="text-red-500">*</span>}
   </label>
 );
 
+const ErrorMsg: React.FC<{ message?: string }> = ({ message }) => {
+  if (!message) return null;
+  return <p className="mt-1.5 ml-1 text-[10px] font-bold text-rose-500 uppercase tracking-wider animate-fadeIn">{message}</p>;
+};
+
 const ApplicationForm: React.FC<ApplicationFormProps> = ({ service, onSave, onCancel, initialData }) => {
   const isEasyPass = service.category === ServiceCategory.EASY_PASS;
-  const isVisaExt = service.category === ServiceCategory.VISA_EXTENSION;
-  const isLetter = service.category === ServiceCategory.LETTER;
-  const isTM30 = service.category === ServiceCategory.TM30;
-  const isTicketing = service.category === ServiceCategory.TICKETING;
+  const [isLookingUp, setIsLookingUp] = useState(false);
+  const [lookupFeedback, setLookupFeedback] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const lastLookupRef = useRef<string>("");
 
-  const [showPassport, setShowPassport] = useState(false);
   const [formData, setFormData] = useState<Partial<VisaApplication>>(initialData || {
     clientName: '',
     passportNumber: '',
@@ -31,202 +42,201 @@ const ApplicationForm: React.FC<ApplicationFormProps> = ({ service, onSave, onCa
     notes: '',
     price: '',
     costPrice: '0',
+    agencyCommission: 0,
     flightNo: '',
+    airline: '',
     embarkation: '',
     agentName: '',
-    visaType: '',
+    visaType: 'Arrival (VOA)',
     letterType: '',
     address: '',
     origin: '',
     destination: '',
+    departCountry: '',
+    landedCountry: 'Thailand',
     arrivalDate: '',
     arrivalTime: '',
     office: service.offices[0] || 'ALL',
     paxCount: 1
   });
 
-  const [isAgent, setIsAgent] = useState(!!initialData?.agentName);
+  const validate = (): boolean => {
+    const newErrors: Record<string, string> = {};
+    if (!formData.clientName?.trim()) newErrors.clientName = "Client identity required";
+    if (!formData.nationality?.trim()) newErrors.nationality = "Nationality required";
+    if (!isEasyPass && !formData.passportNumber?.trim()) newErrors.passportNumber = "Passport number required";
+    if (isEasyPass && !formData.flightNo?.trim()) newErrors.flightNo = "Flight Number required";
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  /**
+   * Refined Flight Verification:
+   * 1. Only triggers if the flight number is new.
+   * 2. Intelligently updates status if flight is landed.
+   * 3. Prevents 'TBA' overwrites by prioritizing real data.
+   */
+  const handleFlightLookup = async (force: boolean = false) => {
+    const fNo = normalizeFlight(formData.flightNo);
+    if (!fNo || fNo.trim().length < 2) return;
+    
+    // Skip if already looked up unless forced
+    if (!force && fNo === lastLookupRef.current) return;
+
+    setIsLookingUp(true);
+    setLookupFeedback(null);
+    lastLookupRef.current = fNo;
+
+    try {
+      const result = await lookupFlightDetails(fNo, formData.arrivalDate);
+      if (result && result.data) {
+        const d = result.data;
+        const flightStatus = d.status?.toLowerCase() || '';
+        const isLanded = ['landed', 'arrived', 'at gate'].some(s => flightStatus.includes(s));
+        
+        setFormData(prev => ({ 
+          ...prev, 
+          airline: (d.airline && d.airline !== 'TBA') ? d.airline : prev.airline,
+          origin: (d.origin && d.origin !== 'TBA') ? d.origin : prev.origin,
+          destination: (d.destination && d.destination !== 'TBA') ? d.destination : prev.destination,
+          departCountry: (d.departCountry && d.departCountry !== 'TBA') ? d.departCountry : prev.departCountry,
+          arrivalDate: (d.arrivalDate && d.arrivalDate !== 'TBA') ? d.arrivalDate : prev.arrivalDate,
+          arrivalTime: (d.arrivalTime && d.arrivalTime !== 'TBA') ? d.arrivalTime : prev.arrivalTime,
+          status: isLanded ? 'Completed' : prev.status,
+          completedAt: isLanded ? new Date().toISOString() : prev.completedAt
+        }));
+
+        setLookupFeedback({ 
+          type: 'success', 
+          message: isLanded 
+            ? `Verified: ${d.airline} Landed. Record Finalized.` 
+            : `Verified: ${d.airline} Telemetry Active.` 
+        });
+        setErrors(prev => ({ ...prev, flightNo: "" }));
+      } else {
+        setLookupFeedback({ type: 'error', message: "Aviation Telemetry Unavailable (Incomplete Source Data)" });
+      }
+    } catch (err) {
+      setLookupFeedback({ type: 'error', message: "Satellite Uplink Error" });
+    } finally {
+      setIsLookingUp(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validate()) return;
     onSave({
       ...formData as VisaApplication,
+      flightNo: normalizeFlight(formData.flightNo),
       id: initialData?.id || Date.now().toString(),
       serviceCategory: service.category,
       subService: service.subService,
-      agentName: isAgent && isVisaExt ? formData.agentName : '',
       createdAt: initialData?.createdAt || new Date().toISOString(),
     });
   };
 
-  const inputClasses = "w-full px-4 py-3 rounded-xl border-2 border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:border-blue-500 dark:focus:border-blue-600 outline-none transition-all text-sm shadow-sm";
+  const getInputClasses = (field: string) => {
+    const base = "w-full px-4 py-3 rounded-xl border-2 bg-white dark:bg-slate-900 text-slate-900 dark:text-white outline-none transition-all text-sm";
+    const status = errors[field] ? "border-rose-400 focus:border-rose-500" : "border-slate-100 dark:border-slate-800 focus:border-blue-500";
+    return `${base} ${status}`;
+  };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 sm:p-4 overflow-hidden">
       <div className="absolute inset-0 bg-slate-900/60 dark:bg-black/80 backdrop-blur-sm" onClick={onCancel} />
-      <div className="relative w-full h-full sm:h-auto sm:max-h-[90vh] sm:max-w-3xl lg:max-w-4xl bg-white dark:bg-slate-900 sm:rounded-[2.5rem] shadow-[0_0_50px_rgba(0,0,0,0.3)] flex flex-col overflow-hidden animate-slideUp">
-        
-        <div className="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-white dark:bg-slate-900 sticky top-0 z-10">
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-2xl text-blue-600 dark:text-blue-400 shadow-inner">
-               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+      <div className="relative w-full h-full sm:h-auto sm:max-h-[95vh] sm:max-w-5xl bg-white dark:bg-slate-900 sm:rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-slideUp">
+        <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-white dark:bg-slate-900 z-10">
+          <h3 className="text-lg font-black text-slate-900 dark:text-white">{service.title}</h3>
+          <button onClick={onCancel} className="p-2 text-slate-400 hover:text-rose-600 transition-all">✕</button>
+        </div>
+        <form id="visa-app-form" onSubmit={handleSubmit} className="p-6 md:p-10 space-y-10 overflow-y-auto grow custom-scrollbar">
+          <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="md:col-span-2">
+              <Label required>Flight Number</Label>
+              <div className="flex gap-2">
+                <input 
+                  className={`${getInputClasses('flightNo')} font-mono uppercase`} 
+                  value={formData.flightNo} 
+                  onChange={(e) => setFormData({ ...formData, flightNo: e.target.value.toUpperCase() })} 
+                  onBlur={() => handleFlightLookup(false)}
+                  placeholder="e.g. EK384" 
+                />
+                <button type="button" onClick={() => handleFlightLookup(true)} disabled={isLookingUp} className="px-6 bg-slate-900 dark:bg-slate-700 text-white rounded-xl text-[10px] font-black uppercase min-w-[140px] transition-all hover:bg-slate-800 dark:hover:bg-slate-600 disabled:opacity-50">
+                  {isLookingUp ? 'Searching...' : 'Manual Verify'}
+                </button>
+              </div>
+              <ErrorMsg message={errors.flightNo} />
+              {lookupFeedback && <div className={`mt-2 text-[10px] font-black px-4 py-2 rounded-xl border ${lookupFeedback.type === 'error' ? 'text-rose-600 border-rose-100 bg-rose-50' : 'text-emerald-600 border-emerald-100 bg-emerald-50'}`}>{lookupFeedback.message}</div>}
             </div>
             <div>
-              <p className="text-[10px] font-black text-blue-600/60 dark:text-blue-400/60 uppercase tracking-[0.2em]">{service.category}</p>
-              <h3 className="text-xl font-black text-slate-900 dark:text-white mt-0.5">
-                {initialData ? 'Update Core Record' : `New ${service.title} Entry`}
-              </h3>
+              <Label required>Client Full Name</Label>
+              <input className={getInputClasses('clientName')} value={formData.clientName} onChange={(e) => setFormData({ ...formData, clientName: e.target.value })} />
+              <ErrorMsg message={errors.clientName} />
             </div>
-          </div>
-          <button onClick={onCancel} className="p-3 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-2xl transition-all">
-             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-        </div>
-
-        <form id="visa-app-form" onSubmit={handleSubmit} className="p-8 lg:p-10 space-y-10 overflow-y-auto grow custom-scrollbar bg-white dark:bg-slate-900">
-          {/* Identity Section */}
-          <section className="space-y-6">
-            <div className="flex items-center gap-3">
-               <div className="h-1 w-12 bg-blue-600 rounded-full"></div>
-               <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Security & Client ID</h4>
+            <div>
+              <Label required>Nationality</Label>
+              <input className={getInputClasses('nationality')} value={formData.nationality} onChange={(e) => setFormData({ ...formData, nationality: e.target.value })} />
+              <ErrorMsg message={errors.nationality} />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="md:col-span-2 lg:col-span-1">
-                <Label required>Client Display Name</Label>
-                <input required className={inputClasses} value={formData.clientName} onChange={(e) => setFormData({ ...formData, clientName: e.target.value })} placeholder="Legal Identity Name" />
-              </div>
-              <div className="relative">
-                <Label required>Passport Reference</Label>
-                <div className="relative group">
-                  <input 
-                    required 
-                    type={showPassport ? "text" : "password"}
-                    className={`${inputClasses} font-mono uppercase tracking-widest pr-12`} 
-                    value={formData.passportNumber} 
-                    onChange={(e) => setFormData({ ...formData, passportNumber: e.target.value })} 
-                    placeholder="Reference Number" 
-                  />
-                  <button 
-                    type="button"
-                    onClick={() => setShowPassport(!showPassport)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-blue-600 transition-colors"
-                  >
-                    {showPassport ? (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88L1 1m11 11l9 9" /></svg>
-                    ) : (
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                    )}
-                  </button>
-                </div>
-              </div>
-              <div className="lg:col-span-1">
-                <Label required>Nationality</Label>
-                <input required className={inputClasses} value={formData.nationality} onChange={(e) => setFormData({ ...formData, nationality: e.target.value })} placeholder="Origin Country" />
-              </div>
-              <div className="lg:col-span-1">
-                <Label required>People Count (Pax)</Label>
-                <input 
-                  required 
-                  type="number" 
-                  min="1" 
-                  className={inputClasses} 
-                  value={formData.paxCount} 
-                  onChange={(e) => setFormData({ ...formData, paxCount: parseInt(e.target.value) || 1 })} 
-                />
-              </div>
+            <div>
+              <Label>Passport Number</Label>
+              <input className={`${getInputClasses('passportNumber')} font-mono`} value={formData.passportNumber} onChange={(e) => setFormData({ ...formData, passportNumber: e.target.value.toUpperCase() })} />
             </div>
-          </section>
-
-          {/* Service Logistics */}
-          <section className="space-y-6">
-            <div className="flex items-center gap-3">
-               <div className="h-1 w-12 bg-slate-200 dark:bg-slate-700 rounded-full"></div>
-               <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Deployment Logistics</h4>
+            <div>
+              <Label>Visa Category</Label>
+              <select className={getInputClasses('visaType')} value={formData.visaType} onChange={(e) => setFormData({ ...formData, visaType: e.target.value })}>
+                {VISA_TYPES.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {isEasyPass && (
-                <>
-                  <div>
-                    <Label required>Flight No.</Label>
-                    <input required className={`${inputClasses} font-mono uppercase`} value={formData.flightNo} onChange={(e) => setFormData({ ...formData, flightNo: e.target.value })} placeholder="e.g. VZ121" />
-                  </div>
-                  <div>
-                    <Label required>Arrival Date</Label>
-                    <input required className={inputClasses} value={formData.arrivalDate} onChange={(e) => setFormData({ ...formData, arrivalDate: e.target.value })} placeholder="e.g. Mar 12" />
-                  </div>
-                  <div>
-                    <Label required>Estimated Time</Label>
-                    <input required className={inputClasses} value={formData.arrivalTime} onChange={(e) => setFormData({ ...formData, arrivalTime: e.target.value })} placeholder="HH:MM" />
-                  </div>
-                </>
-              )}
-              {isTicketing && (
-                <>
-                  <div className="lg:col-span-1"><Label required>Origin Code</Label><input required className={inputClasses} value={formData.origin} onChange={(e) => setFormData({ ...formData, origin: e.target.value })} /></div>
-                  <div className="lg:col-span-1"><Label required>Destination Code</Label><input required className={inputClasses} value={formData.destination} onChange={(e) => setFormData({ ...formData, destination: e.target.value })} /></div>
-                </>
-              )}
-              {isLetter && (
-                <div className="md:col-span-3">
-                  <Label required>Document Classification</Label>
-                  <select required className={inputClasses} value={formData.letterType} onChange={(e) => setFormData({ ...formData, letterType: e.target.value })}>
-                    <option value="">Select Classification</option>
-                    <option>Standard Extension Support</option>
-                    <option>Residence Certification</option>
-                    <option>Identity Verification</option>
-                  </select>
-                </div>
-              )}
+            <div>
+              <Label>Arrival Date</Label>
+              <input type="date" className={getInputClasses('arrivalDate')} value={formData.arrivalDate} onChange={(e) => setFormData({ ...formData, arrivalDate: e.target.value })} />
             </div>
-          </section>
-
-          {/* Workflow & Finance */}
-          <section className="space-y-6">
-            <div className="flex items-center gap-3">
-               <div className="h-1 w-12 bg-emerald-600 rounded-full"></div>
-               <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Financial Audit</h4>
+            <div>
+              <Label>Arrival Time</Label>
+              <input type="time" className={getInputClasses('arrivalTime')} value={formData.arrivalTime} onChange={(e) => setFormData({ ...formData, arrivalTime: e.target.value })} />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+            <div>
+              <Label>Airline</Label>
+              <input className={getInputClasses('airline')} value={formData.airline || ''} onChange={(e) => setFormData({ ...formData, airline: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               <div>
-                <Label required>Billing Revenue</Label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">฿</span>
-                  <input required className={`${inputClasses} pl-8 font-mono font-bold text-emerald-600`} value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} placeholder="0" />
-                </div>
+                <Label>Origin (IATA)</Label>
+                <input className={`${getInputClasses('origin')} font-mono uppercase`} value={formData.origin || ''} onChange={(e) => setFormData({ ...formData, origin: e.target.value.toUpperCase() })} />
               </div>
               <div>
-                <Label required>Supply Cost</Label>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-xs">฿</span>
-                  <input required className={`${inputClasses} pl-8 font-mono`} value={formData.costPrice} onChange={(e) => setFormData({ ...formData, costPrice: e.target.value })} placeholder="0" />
-                </div>
-              </div>
-              <div className="lg:col-span-2">
-                <Label>Workflow Stage</Label>
-                <select className={`${inputClasses} font-black uppercase text-xs tracking-widest`} value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}>
-                  <option>Pending</option>
-                  <option>In Progress</option>
-                  <option>Completed</option>
-                  <option>Cancelled</option>
-                </select>
+                <Label>Dest (IATA)</Label>
+                <input className={`${getInputClasses('destination')} font-mono uppercase`} value={formData.destination || ''} onChange={(e) => setFormData({ ...formData, destination: e.target.value.toUpperCase() })} />
               </div>
             </div>
-          </section>
-
-          <section className="space-y-4 pb-8">
-            <Label>Intelligence Notes</Label>
-            <textarea 
-              className={`${inputClasses} h-40 resize-none custom-scrollbar shadow-inner bg-slate-50/30`} 
-              value={formData.notes} 
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })} 
-              placeholder="Internal case history and requirement logs..." 
-            />
+            <div>
+              <Label>Departure Country</Label>
+              <input className={getInputClasses('departCountry')} value={formData.departCountry || ''} onChange={(e) => setFormData({ ...formData, departCountry: e.target.value })} />
+            </div>
+            <div>
+              <Label>Landing Country</Label>
+              <input className={getInputClasses('landedCountry')} value={formData.landedCountry || ''} onChange={(e) => setFormData({ ...formData, landedCountry: e.target.value })} />
+            </div>
+            <div>
+              <Label>Pax Count</Label>
+              <input type="number" className={getInputClasses('paxCount')} value={formData.paxCount || 1} onChange={(e) => setFormData({ ...formData, paxCount: parseInt(e.target.value) || 1 })} />
+            </div>
+            <div>
+              <Label>Status</Label>
+              <select className={getInputClasses('status')} value={formData.status} onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}>
+                <option value="Pending">Pending</option>
+                <option value="In Progress">In Progress</option>
+                <option value="Completed">Completed</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
+            </div>
           </section>
         </form>
-
-        <div className="px-8 py-8 border-t border-slate-100 dark:border-slate-800 flex gap-4 bg-slate-50 dark:bg-slate-800/20 backdrop-blur-xl">
-          <button type="button" onClick={onCancel} className="flex-1 py-4 font-black text-slate-500 hover:text-slate-900 dark:hover:text-white transition-all uppercase text-xs tracking-[0.2em] border-2 border-slate-200 dark:border-slate-700 rounded-2xl">Abort</button>
-          <button form="visa-app-form" type="submit" className="flex-1 py-4 font-black bg-blue-600 text-white rounded-2xl shadow-2xl shadow-blue-500/40 hover:bg-blue-700 transition-all uppercase text-xs tracking-[0.2em]">Synchronize Record</button>
+        <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex gap-3">
+          <button type="button" onClick={onCancel} className="flex-1 py-4 font-bold text-slate-500 border rounded-2xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-all">Cancel</button>
+          <button form="visa-app-form" type="submit" className="flex-1 py-4 font-bold bg-blue-600 text-white rounded-2xl shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all">Save Record</button>
         </div>
       </div>
     </div>
