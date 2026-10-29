@@ -4,40 +4,27 @@
 
 # Thai Visa CMS Pro
 
-A React + Vite admin panel ("VisaCMS Admin Panel") for tracking Thai visa
-service applications — visa extensions, letter services, TM30 tracking, Easy
-Pass services, and ticketing — with a dashboard, per-service application
-lists, and Excel/PDF export. Data is stored in the browser's localStorage;
-there is no backend or database in this repo.
+React + Vite admin panel ("VisaCMS Admin Panel") for tracking Thai visa service applications: visa extensions, letter services, TM30 tracking, Easy Pass services, and ticketing. It has a dashboard, one application list per service, and Excel/PDF export. Data sits in the browser's localStorage. There is no backend or database in this repo.
 
-View your app in AI Studio: https://ai.studio/apps/drive/18tdCk3OpRwGcdqFDgwYTeZlckFY5t_qA
 
-## Features
+## What it does
 
-- Dashboard with counts per service: Visa Extension, Letter Portal, TM30
-  Tracking, Easy Pass Hub, and Ticket Matrix, plus walk-in / VIP / E-extension
-  breakdowns.
-- Service views: Walk In Extension (GC / IT), E Extension (GC), VIP Extension
-  (GC / IT), Letter Service, TM30 Service, Easy Pass Service, and Ticketing
-  Service.
-- Application form and application list per service, with status updates and
-  flight-number normalisation.
-- Excel backup export, PDF manifest export, and restore from an Excel file
-  (via `xlsx` and `jspdf`).
+- Dashboard with counts per service: Visa Extension, Letter Portal, TM30 Tracking, Easy Pass Hub, and Ticket Matrix, plus walk-in / VIP / E-extension breakdowns.
+- One view per service: Walk In Extension (GC / IT), E Extension (GC), VIP Extension (GC / IT), Letter Service, TM30 Service, Easy Pass Service, Ticketing Service.
+- An application form and list per service, with status updates and flight-number normalisation.
+- Excel backup export, PDF manifest export, and restore from an Excel file (via `xlsx` and `jspdf`).
 - Duplicate clean-up for stored applications.
-- Light / dark / system theme, with the choice saved in the browser.
-- Local login screen: in the current code, any non-empty email and password
-  unlocks the panel — there is no server-side account check, so do not treat
-  it as real authentication.
+- Light / dark / system theme, saved in the browser.
+- Local login screen: in the current code, any non-empty email and password opens the panel. There is no server-side account check, so do not treat it as real authentication.
 
-## Tech Stack
+## Stack
 
 - React 19, TypeScript, Vite 6
 - Tailwind CSS (via CDN in `index.html`)
 - Recharts for charts, `xlsx` and `jspdf` for export
 - Google Gemini API (`@google/genai`, via `services/geminiService.ts`)
 
-## Project Structure
+## Structure
 
 ```txt
 CMS-Pro/
@@ -60,37 +47,24 @@ CMS-Pro/
 └── metadata.json
 ```
 
-## Run Locally
+## Run it
 
-**Prerequisites:** Node.js
+You need Node.js.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. `npm install`
+2. Set `GEMINI_API_KEY` in [.env.local](.env.local)
+3. `npm run dev`
 
-Other scripts: `npm run build` builds for production, `npm run preview`
-previews the production build locally.
+`npm run build` builds for production. `npm run preview` serves that build locally.
 
 ## Live preview (GitHub Pages — post-merge step, not yet live)
 
-This is a Vite app, so Pages serves the production build, not the source
-tree — and no mock or screenshot page has been added:
+Pages serves the production build of a Vite app, not the source tree. No mock or screenshot page has been added.
 
-- `vite.config.ts` now sets `base: '/CMS-Pro/'`, which is required for a
-  project Pages site at `https://itsmeminsithu.github.io/CMS-Pro/`.
-- After this PR is merged, add a Pages build workflow manually via the GitHub
-  web UI (workflow files cannot be pushed through the Muse GitHub App — they
-  return 403). The workflow is described in full in the PR description: it
-  installs dependencies, runs `npm run build`, and deploys `dist/` with
-  GitHub Pages. The repository's Pages source then becomes GitHub Actions.
-- Pages is NOT live until that workflow file exists, a run succeeds, and the
-  URL actually loads — this PR alone does not make it live.
-- Note: the Gemini helper in the preview needs a `GEMINI_API_KEY` secret
-  available at build time (the app inlines it via `vite.config.ts`); without
-  it, the page loads but AI calls will fail. Application data in the preview
-  is per-browser localStorage, not shared.
+- `vite.config.ts` sets `base: '/CMS-Pro/'`, which a project Pages site at `https://itsmeminsithu.github.io/CMS-Pro/` needs.
+- After this PR is merged, add a Pages build workflow by hand in the GitHub web UI. Workflow files cannot be pushed through the Muse GitHub App — they return 403. The workflow is described in full in the PR description: install dependencies, run `npm run build`, deploy `dist/` with GitHub Pages. Pages source then becomes GitHub Actions.
+- Pages is not live until that workflow file exists, a run succeeds, and the URL loads. This PR alone does not make it live.
+- The Gemini helper needs a `GEMINI_API_KEY` secret at build time (the app inlines it via `vite.config.ts`). Without it the page loads, but AI calls fail. Application data in the preview is per-browser localStorage, not shared.
 
 ## License
 
